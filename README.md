@@ -94,7 +94,7 @@ python -m torch.distributed.launch --nproc_per_node 2 -m train_aligner \
 - `data_folders` specifies the folders of training and development data. Each folder should have `train_aligner.json` and `dev_aligner.json`, which can be downloaded at [here](https://osf.io/qw594/files/osfstorage). 
 - `backbone` specifies the initialisation of the Aligner model. It can be set as `E5Retriever`, which uses E5 to initialise the Aligner, or `BGERetriever`, which use BGE to initialise the Aligner. 
 
-The checkpoint will be saved to `save_dir/name` folder. 
+The checkpoint will be saved to `save_dir/name` folder. The trained E5-based Aligner model can be downloaded from the `trained_e5_reasoning_chain_aligner` folder at [here](https://osf.io/qw594/files/osfstorage). 
 
 ## Evaluation 
 
