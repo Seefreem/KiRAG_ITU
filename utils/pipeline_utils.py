@@ -44,6 +44,7 @@ def load_llm_tokenizer_and_model(model_name, hf_token, padding_side="left", dtyp
         "qwen2.5_7b_instruct": "Qwen/Qwen2.5-7B-Instruct",
         "qwen2.5_32b_instruct": "Qwen/Qwen2.5-32B-Instruct",
         "qwen2.5_72b_instruct": "Qwen/Qwen2.5-72B-Instruct",
+        "qwen3.5_9b": "Qwen/Qwen3.5-9B",
         # Gemma
         "gemma2_2b": "google/gemma-2-2b", 
         "gemma2_2b_itstruct": "google/gemma-2-2b-it",

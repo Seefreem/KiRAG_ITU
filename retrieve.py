@@ -49,6 +49,7 @@ def setup_parser():
     parser.add_argument("--save_dir", type=str, default="checkpoint")
     parser.add_argument("--name", type=str, default="e5_retriever")
     parser.add_argument("--save_file", required=True, type=str, help="save retrieval results")
+    parser.add_argument("--max_samples", type=int, default=None, help="limit queries for smoke tests")
     
     args = parser.parse_args()
     return args 
@@ -122,11 +123,7 @@ def setup_kirag_model(args):
     llm_tokenizer, llm_model = load_llm_tokenizer_and_model(args.llm, hf_token=args.hf_token, device=device)
     constructor = Generator(llm_tokenizer, llm_model, max_length=4096, max_new_tokens=64, batch_size=4)
 
-    if args.llm == "llama3":
-        kg_generator = KGGenerator(tokenizer=llm_tokenizer, generator=llm_model, examplar_type=args.dataset, batch_size=4)
-    else:
-        llama3_tokenizer, llama3_model = load_llm_tokenizer_and_model("llama3", device=device)
-        kg_generator = KGGenerator(tokenizer=llama3_tokenizer, generator=llama3_model, examplar_type=args.dataset, batch_size=4)
+    kg_generator = KGGenerator(tokenizer=llm_tokenizer, generator=llm_model, examplar_type=args.dataset, batch_size=4)
     
     if args.cached_kg_triples_file is not None:
         kg_generator.load_cached_kg_triples(args.cached_kg_triples_file)
@@ -162,7 +159,9 @@ if __name__ == "__main__":
 
     # 加载query的数据
     logger.info(f"loading query data from {args.query_file} ...")
-    questions = load_json(args.query_file)[:5]
+    questions = load_json(args.query_file)
+    if args.max_samples is not None:
+        questions = questions[:args.max_samples]
 
     # retrieve
     retrieval_results = retrieve(

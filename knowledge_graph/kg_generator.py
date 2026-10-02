@@ -11,7 +11,7 @@ from typing import Union, Tuple, List, Dict
 import torch 
 import torch.nn as nn
 
-from transformers import LlamaForCausalLM, Qwen2ForCausalLM
+from transformers import LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM
 from transformers import logging as hf_logging
 hf_logging.set_verbosity_error()
 
@@ -34,7 +34,7 @@ class KGGenerator(nn.Module):
 
         self.tokenizer = tokenizer
         self.generator = generator
-        assert isinstance(generator, (LlamaForCausalLM, Qwen2ForCausalLM)) # currently only support using LLaMA3 or Gemma2 as the generator
+        assert isinstance(generator, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM))
         self.device = self.generator.device 
         self.max_length = max_length
         self.max_new_tokens = max_new_tokens
@@ -194,7 +194,7 @@ class KGGenerator(nn.Module):
         """
         prompts = [] 
         for instruction, input in zip(instructions, inputs):
-            if isinstance(self.generator, (LlamaForCausalLM, Qwen2ForCausalLM)):
+            if isinstance(self.generator, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM)):
                 prompts.append(
                     [
                         {"role": "system", "content": instruction},

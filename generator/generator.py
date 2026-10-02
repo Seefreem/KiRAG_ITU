@@ -8,6 +8,7 @@ from transformers import (
     AutoModelForCausalLM, 
     LlamaForCausalLM, 
     Qwen2ForCausalLM,
+    Qwen3_5ForCausalLM,
     MistralForCausalLM,
     Gemma2ForCausalLM, 
     T5ForConditionalGeneration,
@@ -22,7 +23,7 @@ from generator.utils import (
     append_texts_to_encoder_decoder_generator_inputs
 )
 
-SUPPORTED_DECODER_ONLY_GENERATORS = [LlamaForCausalLM, Qwen2ForCausalLM, MistralForCausalLM, Gemma2ForCausalLM]
+SUPPORTED_DECODER_ONLY_GENERATORS = [LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM, MistralForCausalLM, Gemma2ForCausalLM]
 SUPPORTED_ENCODER_DECODER_GENERATORS = [T5ForConditionalGeneration]
 
 
@@ -65,7 +66,7 @@ class Generator(nn.Module):
 
     def init_is_chat(self):
         model_name_or_path = self.generator.config._name_or_path.lower()
-        if "instruct" in model_name_or_path or "chat" in model_name_or_path or "-it" in model_name_or_path:
+        if "instruct" in model_name_or_path or "chat" in model_name_or_path or "-it" in model_name_or_path or "qwen3.5" in model_name_or_path:
             is_chat = True
         else:
             is_chat = False
@@ -103,7 +104,7 @@ class Generator(nn.Module):
         prompts = [] 
         assert len(instructions) == len(messages) # number of instructions shoule be the same as messages 
         for instruction, message_list in zip(instructions, messages):
-            if isinstance(self.generator, (LlamaForCausalLM, Qwen2ForCausalLM)):
+            if isinstance(self.generator, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM)):
                 one_prompt = [{"role": "system", "content": instruction}]
                 if isinstance(message_list, str):
                     one_prompt.append({"role": "user", "content": message_list})
@@ -414,4 +415,3 @@ class AnswerGenerator(Generator):
         results = answers[0] if single_question else answers
 
         return results
-

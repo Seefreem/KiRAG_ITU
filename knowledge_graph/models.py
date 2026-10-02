@@ -10,7 +10,7 @@ from torch import Tensor
 import torch.nn.functional as F
 
 from transformers import AutoTokenizer
-from transformers import LlamaForCausalLM, Qwen2ForCausalLM, T5ForConditionalGeneration
+from transformers import LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM, T5ForConditionalGeneration
 from transformers import logging as hf_logging
 hf_logging.set_verbosity_error()
 
@@ -68,7 +68,7 @@ class TripleSelector(nn.Module):
 
         self.tokenizer = tokenizer
         self.selector = selector
-        assert isinstance(selector, (LlamaForCausalLM, Qwen2ForCausalLM))
+        assert isinstance(selector, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM))
         self.device = self.selector.device 
         self.max_length = max_length
         self.max_new_tokens = max_new_tokens
@@ -764,7 +764,7 @@ class TripleSelector(nn.Module):
         """
         prompts = [] 
         for instruction, input in zip(instructions, inputs):
-            if isinstance(self.selector, (LlamaForCausalLM, Qwen2ForCausalLM)):
+            if isinstance(self.selector, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM)):
                 prompts.append(
                     [
                         {"role": "system", "content": instruction},
@@ -834,7 +834,7 @@ class TripleSelector(nn.Module):
         option_token_id_to_option_map = {}
         options = [str(i) for i in range(num_options)]
         # options = ['A'] + self.all_possible_choices[:num_options]
-        if isinstance(self.selector, (LlamaForCausalLM, Generator)):
+        if isinstance(self.selector, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM, Generator)):
             for option in options:
                 option_token_id_to_option_map[self.tokenizer.encode(option, add_special_tokens=False)[-1]] = option
                 option_token_id_to_option_map[self.tokenizer.encode(" {}".format(option), add_special_tokens=False)[-1]] = option
