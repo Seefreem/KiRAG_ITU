@@ -573,9 +573,11 @@ class AnswerGeneratorReasoning(AnswerGenerator):
                 instructions=instructions,
                 messages=user_inputs,
             )
-            print(f"===prompts===: {prompts}")
+            print("===prompts===")
             for prompt in prompts:
-                print(f"===prompt===: {prompt}")
+                print("===prompt===:")
+                for message in prompt:
+                    print(f"role: {message['role']}, \ncontent: {message['content']}")
             model_inputs = self.tokenizer_encode_chat_format(prompts)
             model_inputs = to_device(model_inputs, self.device)
 
@@ -609,7 +611,9 @@ class AnswerGeneratorReasoning(AnswerGenerator):
                 generated_token_ids,
                 skip_special_tokens=True,
             )
-            print(f"===generated_texts===: {generated_texts}")  
+            print("===generated_texts===")
+            for text in generated_texts:
+                print(f"===: {text}")
             for token_ids in generated_token_ids.tolist():
                 marker_index = self._find_last_subsequence(
                     token_ids,
