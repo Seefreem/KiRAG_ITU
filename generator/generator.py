@@ -9,6 +9,7 @@ from transformers import (
     LlamaForCausalLM, 
     Qwen2ForCausalLM,
     Qwen3_5ForCausalLM,
+    Qwen3_5ForConditionalGeneration,
     MistralForCausalLM,
     Gemma2ForCausalLM, 
     T5ForConditionalGeneration,
@@ -23,7 +24,9 @@ from generator.utils import (
     append_texts_to_encoder_decoder_generator_inputs
 )
 
-SUPPORTED_DECODER_ONLY_GENERATORS = [LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM, MistralForCausalLM, Gemma2ForCausalLM]
+SUPPORTED_DECODER_ONLY_GENERATORS = [LlamaForCausalLM, Qwen2ForCausalLM, 
+                                     Qwen3_5ForConditionalGeneration, Qwen3_5ForCausalLM, 
+                                     MistralForCausalLM, Gemma2ForCausalLM]
 SUPPORTED_ENCODER_DECODER_GENERATORS = [T5ForConditionalGeneration]
 
 
@@ -104,7 +107,7 @@ class Generator(nn.Module):
         prompts = [] 
         assert len(instructions) == len(messages) # number of instructions shoule be the same as messages 
         for instruction, message_list in zip(instructions, messages):
-            if isinstance(self.generator, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM)):
+            if isinstance(self.generator, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForConditionalGeneration, Qwen3_5ForCausalLM)):
                 one_prompt = [{"role": "system", "content": instruction}]
                 if isinstance(message_list, str):
                     one_prompt.append({"role": "user", "content": message_list})
@@ -141,7 +144,17 @@ class Generator(nn.Module):
     
     def tokenizer_encode_chat_format(self, prompts: List[List[Dict[str, str]]], max_length: int=None, add_generation_prompt: bool=True, **kwargs) -> Dict[str, Tensor]:
         max_length = self.max_length if max_length is None else max_length
-        texts = self.tokenizer.apply_chat_template(prompts, tokenize=False, add_generation_prompt=add_generation_prompt) 
+        chat_template_kwargs = {}
+        if "qwen3.5_9b_qa" in self.generator.config._name_or_path.lower():
+            chat_template_kwargs["enable_thinking"] = True
+        elif "qwen3.5_9b_retrieval" in self.generator.config._name_or_path.lower():
+                    chat_template_kwargs["enable_thinking"] = False
+        texts = self.tokenizer.apply_chat_template(
+            prompts,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+            **chat_template_kwargs,
+        )
         batch_dict = self.tokenizer(texts, max_length=max_length, padding=True, truncation=True, return_tensors='pt')
         tokenizer_outputs = {"input_ids": batch_dict["input_ids"], "attention_mask": batch_dict["attention_mask"]}
         return tokenizer_outputs
@@ -263,14 +276,34 @@ class Generator(nn.Module):
             prompts_chat_format = self.get_generator_prompts_chat_format(
                 instructions=instructions, messages=inputs, **kwargs
             )
-            prompts = self.tokenizer.apply_chat_template(prompts_chat_format, tokenize=False, add_generation_prompt=True)
+            chat_template_kwargs = {}
+            if "qwen3.5_9b_qa" in self.generator.config._name_or_path.lower():
+                chat_template_kwargs["enable_thinking"] = True
+            elif "qwen3.5_9b_retrieval" in self.generator.config._name_or_path.lower():
+                chat_template_kwargs["enable_thinking"] = False
+            prompts = self.tokenizer.apply_chat_template(
+                prompts_chat_format,
+                tokenize=False,
+                add_generation_prompt=True,
+                **chat_template_kwargs,
+            )
         else:
             assert all([isinstance(user_input, str) for user_input in inputs]) 
             prompts = [inst + "\n\n" + user_input for inst, user_input in zip(instructions, inputs)]
         return prompts
         
     def generator_generate(self, instructions: List[str], inputs: List[str], current_generated_texts: List[str]=None, **kwargs):
-
+        '''
+        Inputs:
+            instructions: [str], the "few-shot ICL system prompt" to instruct the generator to 
+                answer the question, using triples or documents.
+            inputs: [str], the combo of question, triples, or documents. The first half are triples, and the second half are documents. 
+                The generator will use both triples and documents to answer the question.
+            current_generated_texts: [str] or None, for chain constructor, it is the reasoning chains. 
+        Outputs:
+            generated_token_ids: Tensor, shape (batch_size, max_generation_length)
+            generated_token_logits: Tensor, shape (batch_size, max_generation_length, vocab_size)
+        '''
         assert len(instructions) == len(inputs)
         if current_generated_texts is not None:
             assert len(instructions) == len(current_generated_texts)
@@ -415,3 +448,168 @@ class AnswerGenerator(Generator):
         results = answers[0] if single_question else answers
 
         return results
+
+
+class AnswerGeneratorReasoning(AnswerGenerator):
+    """Generate with model reasoning and return only text after </think>."""
+
+    def __init__(
+        self,
+        tokenizer: AutoTokenizer,
+        generator: AutoModelForCausalLM,
+        max_length: int = 4096,
+        batch_size: int = 1,
+        **kwargs,
+    ):
+        super().__init__(
+            tokenizer=tokenizer,
+            generator=generator,
+            max_length=max_length,
+            batch_size=batch_size,
+            **kwargs,
+        )
+        self.task_instruction = (
+            "Use the supplied context when available. Think through the problem "
+            "once, then double-check the conclusion once. Do not restart, repeat, "
+            "or overthink. After thinking, output only the final answer."
+        )
+        self.answer_prefix = ""
+
+    def tokenizer_encode_chat_format(
+        self,
+        prompts: List[List[Dict[str, str]]],
+        max_length: int = None,
+        add_generation_prompt: bool = True,
+        **kwargs,
+    ) -> Dict[str, Tensor]:
+        max_length = self.max_length if max_length is None else max_length
+        texts = self.tokenizer.apply_chat_template(
+            prompts,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+            enable_thinking=True,
+        )
+        batch_dict = self.tokenizer(
+            texts,
+            max_length=max_length,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+        )
+        return {
+            "input_ids": batch_dict["input_ids"],
+            "attention_mask": batch_dict["attention_mask"],
+        }
+
+    def _model_context_length(self) -> Optional[int]:
+        config = self.generator.config
+        candidates = [
+            getattr(config, "max_position_embeddings", None),
+            getattr(
+                getattr(config, "text_config", None),
+                "max_position_embeddings",
+                None,
+            ),
+            getattr(self.tokenizer, "model_max_length", None),
+        ]
+        candidates = [
+            value
+            for value in candidates
+            if isinstance(value, int) and 0 < value < 10**7
+        ]
+        return min(candidates) if candidates else None
+
+    @staticmethod
+    def _find_last_subsequence(sequence: List[int], subsequence: List[int]) -> int:
+        if not subsequence:
+            return -1
+        for index in range(len(sequence) - len(subsequence), -1, -1):
+            if sequence[index:index + len(subsequence)] == subsequence:
+                return index
+        return -1
+
+    def batch_generate_answers(
+        self,
+        questions: List[str],
+        contexts: Optional[List[List[str]]] = None,
+        task_instructions: Optional[Union[str, List[str]]] = None,
+        **kwargs,
+    ) -> List[str]:
+        if contexts is not None:
+            assert len(questions) == len(contexts)
+        if isinstance(task_instructions, list):
+            assert len(questions) == len(task_instructions)
+
+        think_end_ids = self.tokenizer.encode(
+            "</think>",
+            add_special_tokens=False,
+        )
+        context_length = self._model_context_length()
+        final_answer_token_ids = []
+
+        for start in range(0, len(questions), self.batch_size):
+            batch_questions = questions[start:start + self.batch_size]
+            batch_contexts = (
+                None
+                if contexts is None
+                else contexts[start:start + self.batch_size]
+            )
+            batch_instructions = (
+                task_instructions
+                if task_instructions is None or isinstance(task_instructions, str)
+                else task_instructions[start:start + self.batch_size]
+            )
+            instructions, user_inputs = self.get_generator_inputs(
+                questions=batch_questions,
+                contexts=batch_contexts,
+                task_instructions=batch_instructions,
+            )
+            prompts = self.get_generator_prompts_chat_format(
+                instructions=instructions,
+                messages=user_inputs,
+            )
+            print(f"===prompts===: {prompts}")
+            for prompt in prompts:
+                print(f"===prompt===: {prompt}")
+            model_inputs = self.tokenizer_encode_chat_format(prompts)
+            model_inputs = to_device(model_inputs, self.device)
+
+            # Transformers performs native batched generation. max_new_tokens
+            # is intentionally omitted so the model can finish its reasoning.
+            generation_kwargs = {"do_sample": False}
+            if context_length is not None:
+                generation_kwargs["max_length"] = context_length
+            sequences = self.generator.generate(
+                **model_inputs,
+                **generation_kwargs,
+            )
+            generated_token_ids = self.get_generated_token_ids(
+                model_inputs["input_ids"],
+                sequences,
+            ).detach().cpu()
+            # decode the generated token ids and print all the generated texts for debugging
+            generated_texts = self.tokenizer.batch_decode(
+                generated_token_ids,
+                skip_special_tokens=True,
+            )
+            print(f"===generated_texts===: {generated_texts}")  
+            for token_ids in generated_token_ids.tolist():
+                marker_index = self._find_last_subsequence(
+                    token_ids,
+                    think_end_ids,
+                )
+                if marker_index < 0:
+                    final_answer_token_ids.append([])
+                else:
+                    final_answer_token_ids.append(
+                        token_ids[marker_index + len(think_end_ids):]
+                    )
+
+        final_answer_texts = self.tokenizer.batch_decode(
+            final_answer_token_ids,
+            skip_special_tokens=True,
+        )
+        print(f"===final_answer_texts===: {final_answer_texts}")
+        parsed_answers = self.parse_generated_answers(final_answer_texts)
+        print(f"===parsed_answers===: {parsed_answers}")
+        return parsed_answers

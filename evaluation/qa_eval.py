@@ -8,9 +8,9 @@ import torch
 from transformers import logging as hf_logging
 hf_logging.set_verbosity_error()
 
-from utils.utils import load_json
+from utils.utils import load_json, save_json
 from evaluation.metrics import ems, f1_score
-from generator.generator import AnswerGenerator
+from generator.generator import AnswerGenerator, AnswerGeneratorReasoning
 from utils.pipeline_utils import load_llm_tokenizer_and_model
 
 
@@ -24,6 +24,12 @@ def setup_parser():
     parser.add_argument("--k", type=int, default=3)
     parser.add_argument("--reader", type=str, default="llama3")
     parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--max_new_tokens", type=int, default=2048,
+                        help="generation budget for non-reasoning readers")
+    parser.add_argument("--reasoning", action="store_true",
+                        help="use AnswerGeneratorReasoning and retain only text after </think>")
+    parser.add_argument("--prediction_file", type=str, default=None,
+                        help="optional JSON file to which predictions and per-example scores are written")
 
     args = parser.parse_args()
     return args
@@ -53,7 +59,7 @@ def main(args, reader: AnswerGenerator):
     pred_answers_list = []
     for i in trange((len(question_list)-1)//args.batch_size+1, desc="Answer Prediction Progress"):
         batch_question_list = question_list[i*args.batch_size: (i+1)*args.batch_size]
-        batch_context_list = context_list[i*args.batch_size: (i+1)*args.batch_size]
+        batch_context_list = None if context_list is None else context_list[i*args.batch_size: (i+1)*args.batch_size]
         batch_pred_answers_list = reader.generate_answer(question=batch_question_list, context=batch_context_list)
         pred_answers_list.extend(batch_pred_answers_list)
     
@@ -66,6 +72,20 @@ def main(args, reader: AnswerGenerator):
     
     avg_ems = np.mean(em_scores)
     avg_f1 = np.mean(f1_scores)
+
+    if args.prediction_file is not None:
+        prediction_dir = os.path.dirname(os.path.abspath(args.prediction_file))
+        os.makedirs(prediction_dir, exist_ok=True)
+        predictions = []
+        for example, pred_answer, em_score, f1 in zip(data, pred_answers_list, em_scores, f1_scores):
+            example.update({
+                "predicted_answer": pred_answer,
+                "em": float(em_score),
+                "f1": float(f1),
+            })
+            predictions.append(example)
+        save_json(predictions, args.prediction_file, use_indent=True)
+        print(">>>> Predictions: {}".format(args.prediction_file))
 
     print("==================== Evaluation Result ====================")
     print(">>>> File: {}".format(args.save_file))
@@ -81,7 +101,18 @@ if __name__ == "__main__":
     args = setup_parser()
 
     tokenizer, model = load_llm_tokenizer_and_model(args.reader, hf_token=args.hf_token, dtype=torch.bfloat16)
-    reader = AnswerGenerator(tokenizer=tokenizer, generator=model, max_new_tokens=32, batch_size=args.batch_size)
+    if args.reasoning:
+        reader = AnswerGeneratorReasoning(
+            tokenizer=tokenizer,
+            generator=model,
+            batch_size=args.batch_size,
+        )
+    else:
+        reader = AnswerGenerator(
+            tokenizer=tokenizer,
+            generator=model,
+            max_new_tokens=args.max_new_tokens,
+            batch_size=args.batch_size,
+        )
 
     main(args, reader)
-    

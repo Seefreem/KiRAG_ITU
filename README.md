@@ -143,3 +143,7 @@ python -m evaluation.qa_eval \
     --save_file checkpoint/e5_retriever/dev_2wikimultihopqa_retrieval_results.json \
     --k 3
 ```
+
+This command generates answers from the top-k retrieved documents and then
+computes EM and F1. To save the generated answers, run a 10-example LUMI smoke
+test, or use `Qwen/Qwen3.5-9B`, see [GENERATE_ANSWERS.md](GENERATE_ANSWERS.md).

@@ -1,6 +1,6 @@
 import torch
 from copy import deepcopy
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, Qwen3_5ForConditionalGeneration, Qwen3_5ForCausalLM
 
 
 def load_model_in_4bit(cls, model_name_or_path, hf_token, device=None):
@@ -44,7 +44,8 @@ def load_llm_tokenizer_and_model(model_name, hf_token, padding_side="left", dtyp
         "qwen2.5_7b_instruct": "Qwen/Qwen2.5-7B-Instruct",
         "qwen2.5_32b_instruct": "Qwen/Qwen2.5-32B-Instruct",
         "qwen2.5_72b_instruct": "Qwen/Qwen2.5-72B-Instruct",
-        "qwen3.5_9b": "Qwen/Qwen3.5-9B",
+        "qwen3.5_9b_qa": "Qwen/Qwen3.5-9B", # same model as qwen3.5_9b_retrieval, but with different generation class
+        "qwen3.5_9b_retrieval": "Qwen/Qwen3.5-9B",
         # Gemma
         "gemma2_2b": "google/gemma-2-2b", 
         "gemma2_2b_itstruct": "google/gemma-2-2b-it",
@@ -66,12 +67,19 @@ def load_llm_tokenizer_and_model(model_name, hf_token, padding_side="left", dtyp
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
+    if "qwen3.5_9b_qa" in model_name:
+        model_cls = Qwen3_5ForConditionalGeneration
+    elif "qwen3.5_9b_retrieval" in model_name:
+        model_cls = AutoModelForCausalLM
+    else:
+        model_cls = AutoModelForCausalLM
+     
     if load_in_4bit:
         print(f"loading \"{model_name_or_path}\" model in 4-bits ...")
-        model = load_model_in_4bit(AutoModelForCausalLM, model_name_or_path, hf_token=hf_token, device=device)
+        model = load_model_in_4bit(model_cls, model_name_or_path, hf_token=hf_token, device=device)
     else:
         print(f"loading \"{model_name_or_path}\" model in {dtype} ...")
-        model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=dtype, token=hf_token)
+        model = model_cls.from_pretrained(model_name_or_path, torch_dtype=dtype, token=hf_token)
         model.to(device)
     model.eval()
 

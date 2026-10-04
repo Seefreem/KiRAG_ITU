@@ -1613,13 +1613,25 @@ class KiRAG(nn.Module):
             )
             instructions.extend(document_instruction)
             inputs.extend(document_input)
+        # The instructions, inputs, reasoning_chains are passed to construct the prompt for the constructor model. 
         generated_token_ids, _ = self.constructor_generate(instructions, inputs, reasoning_chains)
+
         generated_texts = self.tokenizer.batch_decode(generated_token_ids, skip_special_tokens=True)
+        # Here "lstrip" means removing leading characters from the string. 
+        # In this case, it removes any leading punctuation characters (.,;) from the generated texts. 
+        # The "strip" method is used to remove any leading or trailing whitespace from the generated texts. 
+        # This ensures that the generated texts are clean and properly formatted before further processing.
         generated_texts = [text.strip().lstrip(".,;").strip() for text in generated_texts]
+        # print the generated texts 
+        print("==KiRAG==(constructing chains): generayted texts:")
+        for te in generated_texts:
+            print(te)
+        print("==KiRAG==(constructing chains)")
 
         for chain, text in zip(reasoning_chains, generated_texts):
             generated_triples = self.kg_generator.parse_triples_text(text)
             if len(generated_triples) > 0:
+                # Only select the first triple to extend the reasoning chain
                 chain.append(generated_triples[0])
             else:
                 if len(text) > 0:
