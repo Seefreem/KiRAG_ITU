@@ -471,7 +471,8 @@ class AnswerGeneratorReasoning(AnswerGenerator):
         self.task_instruction = (
             "Use the supplied context when available. Think through the problem "
             "once, then double-check the conclusion once. Do not restart, repeat, "
-            "or overthink. After thinking, output only the final answer."
+            "or overthink. After thinking, output only the final answer without "
+            "headings, explanations, or another reasoning trace."
         )
         self.answer_prefix = ""
 
@@ -544,7 +545,11 @@ class AnswerGeneratorReasoning(AnswerGenerator):
             "</think>",
             add_special_tokens=False,
         )
-        context_length = self._model_context_length()
+        model_context_length = self._model_context_length()
+        generation_max_length = min(
+            self.max_length,
+            model_context_length or self.max_length,
+        )
         final_answer_token_ids = []
 
         for start in range(0, len(questions), self.batch_size):
@@ -574,11 +579,23 @@ class AnswerGeneratorReasoning(AnswerGenerator):
             model_inputs = self.tokenizer_encode_chat_format(prompts)
             model_inputs = to_device(model_inputs, self.device)
 
-            # Transformers performs native batched generation. max_new_tokens
-            # is intentionally omitted so the model can finish its reasoning.
-            generation_kwargs = {"do_sample": False}
-            if context_length is not None:
-                generation_kwargs["max_length"] = context_length
+            if model_inputs["input_ids"].shape[-1] >= generation_max_length:
+                raise ValueError(
+                    "The tokenized prompt is too long for reasoning generation. "
+                    "Increase AnswerGeneratorReasoning(max_length=...) or reduce "
+                    "the number/length of retrieved contexts."
+                )
+
+            # Use Qwen's thinking-mode sampling parameters. max_new_tokens is
+            # intentionally omitted; max_length bounds the complete sequence.
+            generation_kwargs = {
+                "do_sample": True,
+                "temperature": 1.0,
+                "top_p": 0.95,
+                "top_k": 20,
+                "repetition_penalty": 1.0,
+                "max_length": generation_max_length,
+            }
             sequences = self.generator.generate(
                 **model_inputs,
                 **generation_kwargs,

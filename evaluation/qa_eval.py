@@ -24,7 +24,7 @@ def setup_parser():
     parser.add_argument("--k", type=int, default=3)
     parser.add_argument("--reader", type=str, default="llama3")
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--max_new_tokens", type=int, default=2048,
+    parser.add_argument("--max_new_tokens", type=int, default=4096,
                         help="generation budget for non-reasoning readers")
     parser.add_argument("--reasoning", action="store_true",
                         help="use AnswerGeneratorReasoning and retain only text after </think>")
@@ -105,6 +105,7 @@ if __name__ == "__main__":
         reader = AnswerGeneratorReasoning(
             tokenizer=tokenizer,
             generator=model,
+            max_length=args.max_new_tokens,
             batch_size=args.batch_size,
         )
     else:
