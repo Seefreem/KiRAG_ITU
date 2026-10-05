@@ -250,6 +250,7 @@ class Generator(nn.Module):
         
     def generate(self, inputs, **kwargs) -> Tuple[Tensor, Tensor]:
         max_new_tokens = kwargs.get("max_tokens", None) or kwargs.get("max_new_tokens", None)
+        # check the value of max_new_tokens
         if max_new_tokens is None:
             kwargs["max_new_tokens"] = self.max_new_tokens
         batch_size = kwargs.get("batch_size", None)
@@ -331,7 +332,9 @@ class Generator(nn.Module):
                 if current_generated_texts is not None:
                     prompts = [prompt + " " + text for prompt, text in zip(prompts, current_generated_texts)]
                 generator_inputs = self.tokenizer_encode(prompts)
-        
+        print("===generator_inputs===")
+        for k, v in generator_inputs.items():
+            print(f"==={k}===: {v}")
         generated_token_ids, generated_token_logits = self.generate(generator_inputs, **kwargs)
         return generated_token_ids, generated_token_logits
     

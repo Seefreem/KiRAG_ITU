@@ -1626,7 +1626,7 @@ class KiRAG(nn.Module):
         print("==KiRAG==(constructing chains): generayted texts:")
         for te in generated_texts:
             print(te)
-        print("==KiRAG==(constructing chains)")
+        print("==KiRAG==")
 
         for chain, text in zip(reasoning_chains, generated_texts):
             generated_triples = self.kg_generator.parse_triples_text(text)
@@ -1647,7 +1647,8 @@ class KiRAG(nn.Module):
         reasoning_chains = [[] for _ in range(num_beams)]
         docids_to_scores = {}
         triple_ids_to_scores, triple_ids_to_triple = {}, {}
-
+        print("==KiRAG==(retrieving documents and constructing reasoning chains): question: {}".format(question))
+        
         for i in range(self.num_turns):
 
             if i > 0 and all([len(chain[-1])==0 for chain in reasoning_chains]):

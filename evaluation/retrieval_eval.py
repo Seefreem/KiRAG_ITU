@@ -54,6 +54,8 @@ def evaluate_retrieval_performance_with_qrels(args):
             else:
                 recall = len(true_positives) / len(qid_qrels)
             f1 = 2*precision*recall / (precision+recall)
+        print("===Retrieval performance of {}===".format(qid))
+        print(f"qid: {qid}, precision: {precision}, recall: {recall}, f1: {f1}")
         precision_at_k.append(precision)
         recall_at_k.append(recall)
         f1_at_k.append(f1)
