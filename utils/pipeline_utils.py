@@ -1,6 +1,6 @@
 import torch
 from copy import deepcopy
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, Qwen3_5ForConditionalGeneration
 
 
 def load_model_in_4bit(cls, model_name_or_path, hf_token, device=None):
@@ -66,12 +66,13 @@ def load_llm_tokenizer_and_model(model_name, hf_token, padding_side="left", dtyp
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
     
+    model_cls = Qwen3_5ForConditionalGeneration if "qwen3.5" in model_name else AutoModelForCausalLM
     if load_in_4bit:
         print(f"loading \"{model_name_or_path}\" model in 4-bits ...")
-        model = load_model_in_4bit(AutoModelForCausalLM, model_name_or_path, hf_token=hf_token, device=device)
+        model = load_model_in_4bit(model_cls, model_name_or_path, hf_token=hf_token, device=device)
     else:
         print(f"loading \"{model_name_or_path}\" model in {dtype} ...")
-        model = AutoModelForCausalLM.from_pretrained(model_name_or_path, torch_dtype=dtype, token=hf_token)
+        model = model_cls.from_pretrained(model_name_or_path, torch_dtype=dtype, token=hf_token)
         model.to(device)
     model.eval()
 

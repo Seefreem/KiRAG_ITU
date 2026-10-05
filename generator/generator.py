@@ -8,7 +8,7 @@ from transformers import (
     AutoModelForCausalLM, 
     LlamaForCausalLM, 
     Qwen2ForCausalLM,
-    Qwen3_5ForCausalLM,
+    Qwen3_5ForConditionalGeneration,
     MistralForCausalLM,
     Gemma2ForCausalLM, 
     T5ForConditionalGeneration,
@@ -23,7 +23,7 @@ from generator.utils import (
     append_texts_to_encoder_decoder_generator_inputs
 )
 
-SUPPORTED_DECODER_ONLY_GENERATORS = [LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM, MistralForCausalLM, Gemma2ForCausalLM]
+SUPPORTED_DECODER_ONLY_GENERATORS = [LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForConditionalGeneration, MistralForCausalLM, Gemma2ForCausalLM]
 SUPPORTED_ENCODER_DECODER_GENERATORS = [T5ForConditionalGeneration]
 
 
@@ -104,7 +104,7 @@ class Generator(nn.Module):
         prompts = [] 
         assert len(instructions) == len(messages) # number of instructions shoule be the same as messages 
         for instruction, message_list in zip(instructions, messages):
-            if isinstance(self.generator, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForCausalLM)):
+            if isinstance(self.generator, (LlamaForCausalLM, Qwen2ForCausalLM, Qwen3_5ForConditionalGeneration)):
                 one_prompt = [{"role": "system", "content": instruction}]
                 if isinstance(message_list, str):
                     one_prompt.append({"role": "user", "content": message_list})
@@ -141,7 +141,15 @@ class Generator(nn.Module):
     
     def tokenizer_encode_chat_format(self, prompts: List[List[Dict[str, str]]], max_length: int=None, add_generation_prompt: bool=True, **kwargs) -> Dict[str, Tensor]:
         max_length = self.max_length if max_length is None else max_length
-        texts = self.tokenizer.apply_chat_template(prompts, tokenize=False, add_generation_prompt=add_generation_prompt) 
+        chat_template_kwargs = {}
+        if "qwen3.5" in self.generator.config._name_or_path.lower():
+            chat_template_kwargs["enable_thinking"] = True
+        texts = self.tokenizer.apply_chat_template(
+            prompts,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+            **chat_template_kwargs,
+        )
         batch_dict = self.tokenizer(texts, max_length=max_length, padding=True, truncation=True, return_tensors='pt')
         tokenizer_outputs = {"input_ids": batch_dict["input_ids"], "attention_mask": batch_dict["attention_mask"]}
         return tokenizer_outputs
@@ -263,7 +271,15 @@ class Generator(nn.Module):
             prompts_chat_format = self.get_generator_prompts_chat_format(
                 instructions=instructions, messages=inputs, **kwargs
             )
-            prompts = self.tokenizer.apply_chat_template(prompts_chat_format, tokenize=False, add_generation_prompt=True)
+            chat_template_kwargs = {}
+            if "qwen3.5" in self.generator.config._name_or_path.lower():
+                chat_template_kwargs["enable_thinking"] = True
+            prompts = self.tokenizer.apply_chat_template(
+                prompts_chat_format,
+                tokenize=False,
+                add_generation_prompt=True,
+                **chat_template_kwargs,
+            )
         else:
             assert all([isinstance(user_input, str) for user_input in inputs]) 
             prompts = [inst + "\n\n" + user_input for inst, user_input in zip(instructions, inputs)]
@@ -349,14 +365,24 @@ class AnswerGenerator(Generator):
     def parse_generated_answers(self, texts: List[str]) -> List[str]:
 
         def parse_answer(answer: str) -> str:
+            # Reasoning models such as Qwen 3.5 wrap their private reasoning in
+            # <think>...</think>. Only the final response is returned, scored,
+            # and persisted by the QA evaluation pipeline.
+            if "</think>" in answer:
+                answer = answer.rsplit("</think>", 1)[1]
+            elif "<think>" in answer:
+                # The reasoning was truncated before a final answer appeared.
+                return ""
+
             candidate_answers = answer.split("\n")
             answer = ""
             i = 0 
             while len(answer) < 1 and i<len(candidate_answers):
                 answer = candidate_answers[i].strip()
                 i += 1 
-            if "answer is" in answer:
-                idx = answer.find("answer is")
+            normalized_answer = answer.lower()
+            if "answer is" in normalized_answer:
+                idx = normalized_answer.find("answer is")
                 answer = answer[idx+len("answer is"): ].strip()
                 if answer.startswith(":"):
                     answer = answer[1:].strip()
@@ -389,7 +415,26 @@ class AnswerGenerator(Generator):
             inputs=user_inputs, 
             **kwargs
         )
-        generated_texts = self.tokenizer.batch_decode(generated_token_ids, skip_special_tokens=True)
+
+        # Split at token level because some tokenizers treat <think> and
+        # </think> as special tokens and remove them during decoding.
+        token_ids_to_decode = generated_token_ids
+        tokenizer_vocab = self.tokenizer.get_vocab()
+        think_start_id = tokenizer_vocab.get("<think>")
+        think_end_id = tokenizer_vocab.get("</think>")
+        if think_start_id is not None and think_end_id is not None:
+            final_token_ids = []
+            for token_ids in generated_token_ids.tolist():
+                if think_end_id in token_ids:
+                    last_think_end = len(token_ids) - 1 - token_ids[::-1].index(think_end_id)
+                    token_ids = token_ids[last_think_end + 1:]
+                elif think_start_id in token_ids:
+                    # Generation ended inside the reasoning block.
+                    token_ids = []
+                final_token_ids.append(token_ids)
+            token_ids_to_decode = final_token_ids
+
+        generated_texts = self.tokenizer.batch_decode(token_ids_to_decode, skip_special_tokens=True)
         answers = self.parse_generated_answers(generated_texts)
 
         return answers
