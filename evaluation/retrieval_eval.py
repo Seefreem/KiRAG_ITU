@@ -1,7 +1,8 @@
 import argparse
+import json
 import numpy as np 
 from tqdm import tqdm
-from utils.utils import load_json
+from utils.utils import load_json, save_json
 from evaluation.metrics import has_answer
 
 
@@ -54,13 +55,17 @@ def evaluate_retrieval_performance_with_qrels(args):
             else:
                 recall = len(true_positives) / len(qid_qrels)
             f1 = 2*precision*recall / (precision+recall)
-        print("===Retrieval performance of {}===".format(qid))
-        print(f"qid: {qid}, precision: {precision}, recall: {recall}, f1: {f1}")
+        # Save the precision, recall, and f1 into the samples 
+        example["precision"] = precision
+        example["recall"] = recall
+        example["f1"] = f1
         precision_at_k.append(precision)
         recall_at_k.append(recall)
         f1_at_k.append(f1)
         num_documents_at_k.append(len(topk_ranked_document_ids))
-    
+    # Save the updated samples with precision, recall, and f1 into the same file
+    save_json(retrieval_results, args.save_file, use_indent=True)
+
     metrics = {}
     metrics["Precision@{}".format(args.k)] = np.mean(precision_at_k)
     metrics["Recall@{}".format(args.k)] = np.mean(recall_at_k)

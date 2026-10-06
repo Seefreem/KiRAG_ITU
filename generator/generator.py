@@ -322,6 +322,11 @@ class Generator(nn.Module):
                 prompts_chat_format = self.get_generator_prompts_chat_format(
                     instructions=instructions, messages=inputs, **kwargs
                 )
+                print("===prompts===")
+                for prompt in prompts_chat_format:
+                    print("===prompt===:")
+                    for message in prompt:
+                        print(f"role: {message['role']}, \ncontent: {message['content']}")
                 generator_inputs = self.tokenizer_encode_chat_format(prompts_chat_format, **kwargs)
                 if current_generated_texts is not None:
                     generator_inputs = append_texts_to_decoder_only_generator_inputs(
@@ -329,12 +334,12 @@ class Generator(nn.Module):
                     )
             else:
                 prompts = [inst + "\n\n" + user_input for inst, user_input in zip(instructions, inputs)]
+                print("===prompts===")
+                for prompt in prompts:
+                    print("===prompt===:\n{}".format(prompt))
                 if current_generated_texts is not None:
                     prompts = [prompt + " " + text for prompt, text in zip(prompts, current_generated_texts)]
                 generator_inputs = self.tokenizer_encode(prompts)
-        print("===generator_inputs===")
-        for k, v in generator_inputs.items():
-            print(f"==={k}===: {v}")
         generated_token_ids, generated_token_logits = self.generate(generator_inputs, **kwargs)
         return generated_token_ids, generated_token_logits
     

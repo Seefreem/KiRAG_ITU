@@ -1623,7 +1623,7 @@ class KiRAG(nn.Module):
         # This ensures that the generated texts are clean and properly formatted before further processing.
         generated_texts = [text.strip().lstrip(".,;").strip() for text in generated_texts]
         # print the generated texts 
-        print("==KiRAG==(constructing chains): generayted texts:")
+        print("==KiRAG==(constructing chains): generated texts:")
         for te in generated_texts:
             print(te)
         print("==KiRAG==")
