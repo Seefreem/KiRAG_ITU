@@ -304,6 +304,11 @@ class Generator(nn.Module):
                 prompts_chat_format = self.get_generator_prompts_chat_format(
                     instructions=instructions, messages=inputs, **kwargs
                 )
+                print("===prompts===")
+                for prompt in prompts_chat_format:
+                    print("===prompt===:")
+                    for message in prompt:
+                        print(f"role: {message['role']}, \ncontent: {message['content']}")
                 generator_inputs = self.tokenizer_encode_chat_format(prompts_chat_format, **kwargs)
                 if current_generated_texts is not None:
                     generator_inputs = append_texts_to_decoder_only_generator_inputs(
@@ -435,6 +440,9 @@ class AnswerGenerator(Generator):
             token_ids_to_decode = final_token_ids
 
         generated_texts = self.tokenizer.batch_decode(token_ids_to_decode, skip_special_tokens=True)
+        print("===generated_texts===")
+        for i, text in enumerate(generated_texts):
+            print(f"===generated_texts[{i}]===:\n{text}")
         answers = self.parse_generated_answers(generated_texts)
 
         return answers

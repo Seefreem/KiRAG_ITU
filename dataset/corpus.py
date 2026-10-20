@@ -11,7 +11,7 @@ CORPUS_PATH = {
     "wikipedia": "/nfs/common/data/wikipedia/psgs_w100.tsv",
     "hotpotqa": "/nfs/common/data/hotpotqa/open_domain_data/corpus.json", 
     "2wikimultihopqa": "data/2wikimultihopqa/open_domain_data/corpus.json",
-    "musique": "/nfs/common/data/musique/open_domain_data/corpus.json"
+    "musique": "data/musique/open_domain_data/corpus.json"
 }
 
 def load_psg_data(path):
