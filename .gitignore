@@ -109,6 +109,7 @@ ENV/
 # IDE settings
 .vscode/
 .idea/
+.lumi/
 
 # Misc
 .DS_Store
@@ -118,5 +119,11 @@ outputs/
 debug/
 debug*.py
 checkpoint/
+checkpoint*/
 checkpoints/
+scripts/
+scripts_backup/
+scripts_backup_2/
+
+*.xlsx
 

@@ -1615,6 +1615,9 @@ class KiRAG(nn.Module):
             inputs.extend(document_input)
         generated_token_ids, _ = self.constructor_generate(instructions, inputs, reasoning_chains)
         generated_texts = self.tokenizer.batch_decode(generated_token_ids, skip_special_tokens=True)
+        for generated_text in generated_texts:
+            print("====Generated text====: \n{}".format(generated_text))
+
         generated_texts = [text.strip().lstrip(".,;").strip() for text in generated_texts]
 
         for chain, text in zip(reasoning_chains, generated_texts):

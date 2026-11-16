@@ -8,3 +8,4 @@ torchvision==0.17.1
 torchaudio==2.2.1
 transformers==4.44.2
 faiss-cpu==1.8.0.post1
+tensorboard
