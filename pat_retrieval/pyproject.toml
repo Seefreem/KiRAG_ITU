@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pat-retrieval"
+version = "0.1.0"
+description = "Configurable FAISS retrieval and PAT_BERT reranking"
+requires-python = ">=3.10"
+dependencies = ["numpy", "faiss-cpu>=1.8", "torch>=2.2", "transformers>=4.44,<5"]
+
+[tool.setuptools]
+packages = ["pat_retrieval", "pat_retrieval.modeling"]
+package-dir = {pat_retrieval = ".", "pat_retrieval.modeling" = "modeling"}

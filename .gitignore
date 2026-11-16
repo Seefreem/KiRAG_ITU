@@ -124,6 +124,8 @@ checkpoints/
 scripts/
 scripts_backup/
 scripts_backup_2/
+docs/
+kg_corpus/
 
 *.xlsx
 

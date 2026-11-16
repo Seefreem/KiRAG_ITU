@@ -1634,6 +1634,8 @@ class KiRAG(nn.Module):
     def retrieve(self, question: str, num_beams: int=1, **kwargs):
 
         assert num_beams in [1, 2], "num_beams must be chosen from [1, 2]"
+        if hasattr(self.retriever, 'reset'):
+            self.retriever.reset()
         ranked_examplars_indices = self.rank_examplars(question=question)
         reasoning_chains = [[] for _ in range(num_beams)]
         docids_to_scores = {}

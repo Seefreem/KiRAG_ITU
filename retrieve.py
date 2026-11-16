@@ -8,6 +8,7 @@ from transformers import AutoTokenizer
 from knowledge_graph.kg_generator import KGGenerator
 from knowledge_graph.models import KiRAG
 
+from pat_retrieval import PATRetrievalPipeline
 from retriever.index import Indexer
 from retriever.retrievers import InBatchRetriever, DenseRetriever
 from generator.generator import Generator
@@ -33,6 +34,10 @@ def setup_parser():
     parser.add_argument("--index_folder", type=str, default="checkpoint/e5_retriever/2wikimultihopqa", help="the path of the corpus index")
     parser.add_argument("--embedding_size", type=int, default=1024)
 
+    parser.add_argument('--document_retrieval', choices=['pat', 'dense'], default='pat')
+    parser.add_argument('--pat_config', default='pat_retrieval_config.json',
+                        help='FAISS, corpus, PAT_BERT and output settings; authoritative in PAT mode')
+
     # retriever settings
     parser.add_argument("--retriever_name", type=str, default="E5Retriever", choices=["E5Retriever", "BGERetriever"], help="the name of the retriever")
     parser.add_argument("--retriever_model_name_or_path", type=str, default="intfloat/e5-large-v2", help="the name or path of the retriever model")
@@ -43,7 +48,7 @@ def setup_parser():
     parser.add_argument("--cached_kg_triples_file", type=str, default=None)
     parser.add_argument("--aligner_model", type=str, default="e5", choices=["e5", "bge"], help="the backbone of the Reasoning Chain Aligner model.")
     parser.add_argument("--aligner_model_name_or_path", type=str, required=True, help="The huggingface name or path of the Aligner model.")
-    parser.add_argument("--num_beams", type=int, default=1, choices=[1, 2], help="number of reasoning chains. 1 denotes using only triples and 2 denotes using both triples and documents.")
+    parser.add_argument("--num_beams", type=int, default=None, choices=[1, 2], help="number of reasoning chains. 1 denotes using only triples and 2 denotes using both triples and documents.")
 
     parser.add_argument("--per_gpu_batch_size", type=int, default=8)
     parser.add_argument("--save_dir", type=str, default="checkpoint")
@@ -85,6 +90,20 @@ def retrieve(args, questions, model, corpus_dataset):
     return retrieval_results
 
 def setup_retriever_model(args):
+
+    if args.document_retrieval == 'pat':
+        pipeline = PATRetrievalPipeline(args.pat_config)
+        if pipeline.beams not in (1, 2):
+            raise ValueError('KiRAG supports only one or two configured beams')
+        if args.num_beams is not None and args.num_beams != pipeline.beams:
+            raise ValueError('--num_beams must match beams in --pat_config')
+        if not {'id', 'score'}.issubset(pipeline.return_items):
+            raise ValueError('KiRAG requires id and score in return_items')
+        args.num_beams = pipeline.beams
+        return pipeline, pipeline.corpus
+
+    if args.num_beams is None:
+        args.num_beams = 1
 
     # load tokenizer
     retriever_name = args.retriever_name
@@ -130,6 +149,7 @@ def setup_kirag_model(args):
     
     kirag = KiRAG(
         retriever=dense_retriever,
+        topk=dense_retriever.output_count if isinstance(dense_retriever, PATRetrievalPipeline) else 10,
         kg_generator=kg_generator, 
         constructor=constructor, 
         examplar_type=args.dataset,

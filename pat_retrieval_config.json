@@ -1,0 +1,26 @@
+{
+  "index_file": "checkpoint/e5_retriever/2wikimultihopqa/index.faiss",
+  "index_meta_file": "checkpoint/e5_retriever/2wikimultihopqa/index_meta.faiss",
+  "corpus_files": [
+    "data/2wikimultihopqa/open_domain_data/corpus.json"
+  ],
+  "return_top_k": 10,
+  "cache_size": 58,
+  "beams": 1,
+  "return_items": [
+    "id",
+    "score",
+    "contents"
+  ],
+  "pat_bert": {
+    "checkpoint": "checkpoint/bert_pat_checkp_tboth_bs128_ep2_lr2e_6_wbce_pw10_3_skip79000steps/best.pt",
+    "device": "cuda"
+  },
+  "encoder": {
+    "model": "intfloat/e5-large-v2",
+    "tokenizer": "intfloat/e5-large-v2",
+    "retriever": "E5Retriever",
+    "device": "cuda",
+    "query_maxlength": 512
+  }
+}
