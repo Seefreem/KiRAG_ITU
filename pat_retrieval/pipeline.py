@@ -17,11 +17,14 @@ class PATRetrievalPipeline:
 
         self.config = config if isinstance(config, RetrievalConfig) else RetrievalConfig.from_file(config)
         config = self.config
+        self.debug = config.debug
         self.cache_size = config.cache_size
         self.output_count = config.return_top_k
         self.beams = config.beams
         self.return_items = config.return_items
         self.index = faiss.read_index(config.index_file)
+        # The query encoder L2-normalizes its embeddings. If the stored document embeddings are
+        # also L2-normalized—as expected for the E5 index—inner product equals cosine similarity.
         if not isinstance(self.index, faiss.IndexFlatIP):
             raise ValueError('PAT requires IndexFlatIP with exact stored document vectors')
         with open(config.index_meta_file, 'rb') as source:
@@ -40,15 +43,40 @@ class PATRetrievalPipeline:
         encoder = config.encoder
         self.encoder = QueryEncoder(dict(retriever=encoder.retriever, model=encoder.model, tokenizer=encoder.tokenizer),
                                     encoder.device, encoder.query_maxlength)
+        self._trace('loaded', index_file=config.index_file, metric='inner_product',
+                    indexed_documents=self.index.ntotal, embedding_dimension=self.index.d,
+                    corpus_files=list(config.corpus_files), checkpoint=bert.checkpoint,
+                    cache_size=self.cache_size, beams=self.beams,
+                    return_top_k=self.output_count, return_items=list(self.return_items))
         self.reset()
 
+    def _trace(self, stage, **data):
+        """Print one structured record per stage, without dumping vectors/text."""
+        if getattr(self, 'debug', False):
+            import json
+            print('[pat_retrieval] ' + json.dumps(dict(stage=stage, **data)), flush=True)
+
     def reset(self):
-        """Discard question-local caches (one independent cache per beam position)."""
+        """Discard question-local caches (one independent cache per beam position).
+        # Structure: {stream: [cached_document, ...]}.
+        # stream is the integer query/beam position (0, 1, ...).
+        # Each list contains at most cache_size documents, sorted by descending
+        # PAT score from that stream's most recent reranking. IDs are unique
+        # within a stream; different streams may cache the same document.
+        # A cached_document contains:
+        #   id: str                  -- corpus document ID
+        #   vector: ndarray[D]       -- original FAISS vector (float32)
+        #   faiss_score: float       -- similarity when first admitted to cache
+        #   score: float             -- latest PAT reranking score
+        # Titles/text remain in the corpus, not in this internal cache.
+        """
         self._caches = {}
+        self._trace('cache_reset')
 
     def _rank(self, query, fresh, stream):
         """Keep cached positions first, then unique new candidates in FAISS order."""
         import math
+        # Missing stream means its first iteration: no retained documents yet.
         cached = self._caches.get(stream, [])
         candidates = list(cached)
         seen = {doc['id'] for doc in cached}
@@ -62,13 +90,28 @@ class PATRetrievalPipeline:
         # when every cached document occurs again in the fresh search.
         if len(candidates) != self.candidate_count:
             raise ValueError('PAT needs exactly 508 unique document candidates')
+        cached_ids = {doc['id'] for doc in cached}
+        self._trace('candidates', stream=stream, fresh_count=len(fresh), cached_count=len(cached),
+                    fresh_unique_count=len({doc['id'] for doc in fresh}),
+                    fresh_cache_overlap=sum(doc['id'] in cached_ids for doc in fresh),
+                    selected_new_count=len(candidates) - len(cached), pat_input_count=len(candidates))
+        self._trace('pat_rerank_start', stream=stream, query_shape=[1, len(query)],
+                    document_shape=[1, len(candidates), len(candidates[0]['vector'])])
         scores = self.reranker.score([query], [candidates])[0]
         if len(scores) != len(candidates) or not all(math.isfinite(s) for s in scores):
             raise ValueError('PAT returned invalid scores')
         ranked = sorted((dict(doc, score=float(score)) for doc, score in zip(candidates, scores)),
                         key=lambda doc: doc['score'], reverse=True)
+        # Replace only this beam's cache; score is refreshed for every retained
+        # document, while vector and historical faiss_score are preserved.
         self._caches[stream] = ranked[:self.cache_size]
-        return [self._format_document(doc) for doc in ranked[:self.output_count]]
+        self._trace('pat_rerank_complete', stream=stream, score_min=min(scores), score_max=max(scores),
+                    cache_count=len(self._caches[stream]))
+        result = [self._format_document(doc) for doc in ranked[:self.output_count]]
+        self._trace('returned', stream=stream, count=len(result),
+                    top_documents=[{'id': doc['id'], 'score': doc['score']} for doc in ranked[:self.output_count]],
+                    return_items=list(self.return_items), fields=sorted(result[0]) if result else [])
+        return result
 
     def _format_document(self, document):
         result = {}
@@ -97,19 +140,28 @@ class PATRetrievalPipeline:
             return []
         if len(queries) > self.beams:
             raise ValueError('Query count exceeds configured beams')
+        self._trace('queries', count=len(queries), character_counts=[len(query) for query in queries])
         vectors = np.ascontiguousarray(self.encoder.encode(queries), dtype=np.float32)
         if vectors.shape != (len(queries), self.index.d) or not np.isfinite(vectors).all():
             raise ValueError('Invalid query vectors for FAISS index')
+        self._trace('query_encoded', shape=list(vectors.shape), dtype=str(vectors.dtype))
+        # distances, ids = index.search(query_vectors, k=3)
+        # Both arrays have shape (number_of_queries, k). For query i, ids[i, j] identifies the j-th ranked result,
+        # and distances[i, j] gives its distance or similarity score.
+        # Descending order of scores is expected for inner product similarity, which is the default for E5.
         scores, rows = self.index.search(vectors, self.candidate_count)
         if (rows < 0).any() or not np.isfinite(scores).all():
             raise ValueError('FAISS returned missing documents or invalid scores')
+        self._trace('faiss_search', metric='inner_product', result_shape=list(rows.shape))
         results = []
-        for stream, (query, query_rows, query_scores) in enumerate(zip(vectors, rows, scores)):
-            documents = self.index.reconstruct_batch(np.ascontiguousarray(query_rows, dtype=np.int64))
+        for stream, (query, retrieved_ids, query_scores) in enumerate(zip(vectors, rows, scores)):
+            documents = self.index.reconstruct_batch(np.ascontiguousarray(retrieved_ids, dtype=np.int64))
             if not np.isfinite(documents).all():
                 raise ValueError('Nonfinite indexed document vectors')
+            self._trace('vectors_reconstructed', stream=stream, shape=list(documents.shape),
+                        faiss_score_max=float(query_scores.max()), faiss_score_min=float(query_scores.min()))
             fresh = [{'id': self.ids[int(row)], 'vector': vector, 'faiss_score': float(score)}
-                     for row, vector, score in zip(query_rows, documents, query_scores)]
+                     for row, vector, score in zip(retrieved_ids, documents, query_scores)]
             results.append(self._rank(query, fresh, stream))
         return results[0] if single else results
 

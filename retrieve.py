@@ -35,7 +35,7 @@ def setup_parser():
     parser.add_argument("--embedding_size", type=int, default=1024)
 
     parser.add_argument('--document_retrieval', choices=['pat', 'dense'], default='pat')
-    parser.add_argument('--pat_config', default='pat_retrieval_config.json',
+    parser.add_argument('--pat_config', default='pat_retrieval/pat_retrieval_config.json',
                         help='FAISS, corpus, PAT_BERT and output settings; authoritative in PAT mode')
 
     # retriever settings

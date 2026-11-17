@@ -1,20 +1,20 @@
 # PAT retrieval module
 
-Independent FAISS retrieval, PAT_BERT reranking, document loading, and per-beam
+Independent FAISS retrieval, PAT_BERT reranking, corpus loading, and per-beam
 caching. No imports from KiRAG or `scripts/`. Install elsewhere with
 `pip install ./pat_retrieval`, or copy the package into another project.
 
 ```python
 from pat_retrieval import PATRetrievalPipeline, RetrievalConfig
 
-pipeline = PATRetrievalPipeline('pat_retrieval_config.json')
+pipeline = PATRetrievalPipeline('pat_retrieval/pat_retrieval_config.json')
 # Alternatively: PATRetrievalPipeline(RetrievalConfig(...))
 pipeline.reset()  # once per new question
 results = pipeline(['Who ...?'])
 next_results = pipeline(['Who ...? Additional reasoning context'])
 ```
 
-The repository's `pat_retrieval_config.json` is the working example. All data
+The repository's `pat_retrieval/pat_retrieval_config.json` is the working example. All data
 paths in a JSON config resolve relative to that config file. When constructing
 `RetrievalConfig` directly, relative paths resolve from the working directory.
 Encoder model/tokenizer names are Hugging Face identifiers or local paths;
@@ -31,7 +31,7 @@ local encoder paths resolve from the working directory.
 | `return_items` | Any nonempty selection of `id`, `score`, `contents`, `embedding` |
 | `pat_bert.checkpoint` | Trained checkpoint file; example preserves the requested path |
 | `pat_bert.device` | Device for PAT_BERT inference |
-| `encoder` | Retrieval model, tokenizer, retriever type, device, query_maxlength |
+| `encoder` | text embedder: Retrieval model, tokenizer, retriever type, device, query_maxlength |
 
 `contents` expands all corpus fields into each result, including title, text,
 sentences and other custom fields. Reserved `id`, `score`, and `embedding` are
@@ -66,7 +66,7 @@ Use the same retrieval encoder and preprocessing used to build the index and
 train PAT. Dimension checks cannot detect different models of the same size.
 Load trusted checkpoint and metadata files.
 
-KiRAG defaults to `--document_retrieval pat --pat_config pat_retrieval_config.json`.
+KiRAG defaults to `--document_retrieval pat --pat_config pat_retrieval/pat_retrieval_config.json`.
 In PAT mode the configuration controls index, corpus, encoder, PAT_BERT, top-k
 and beams; the legacy dense-retrieval path/encoder arguments apply only to
 `--document_retrieval dense`. KiRAG supports one or two beams and requires `id`
@@ -79,3 +79,17 @@ corpus contents, independently of the retrieval return selection.
 Validation: `python3 -m unittest discover -s tests -p 'test_pat_retrieval.py'`.
 Full inference requires NumPy, FAISS, PyTorch, Transformers, retrieval encoder
 weights, index/corpus files and the specified PAT checkpoint.
+
+Set `"debug": true` in the config to print structured data-flow records to stdout
+(prefixed `[pat_retrieval]`). Set it to `false` for quiet operation (the code
+also defaults to false when omitted). Stages report initialization, cache resets,
+query/vector shapes, FAISS search, reconstructed vector shapes, cache overlap,
+selected new candidates, PAT scoring, updated cache size, and returned IDs,
+scores and field names. Full query text, document contents and vector values
+are not dumped. Each query stream is identified by `stream`.
+
+```text
+queries -> query_encoded -> faiss_search -> vectors_reconstructed
+        -> candidates (cached + deduplicated new)
+        -> pat_rerank_start -> pat_rerank_complete -> returned
+```

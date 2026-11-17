@@ -92,7 +92,7 @@ class ConfigurationTests(unittest.TestCase):
         base = dict(index_file='i', index_meta_file='m', corpus_files=('c',))
         for change in (dict(cache_size=508), dict(cache_size=-1), dict(return_top_k=0),
                        dict(beams=0), dict(return_items=('unknown',)), dict(return_items='id'),
-                       dict(corpus_files='corpus.json')):
+                       dict(corpus_files='corpus.json'), dict(debug='true')):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 RetrievalConfig(**(base | change))
 
@@ -108,6 +108,36 @@ class ConfigurationTests(unittest.TestCase):
         pipeline.cache_size = 0
         pipeline._rank([0], fresh, 0)
         self.assertEqual(pipeline._caches[0], [])
+
+
+class DebugTests(unittest.TestCase):
+    def test_trace_is_opt_in_and_describes_cache_rollover(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        import json
+        pipeline = PATRetrievalPipeline.__new__(PATRetrievalPipeline)
+        pipeline.reranker = RecordingReranker()
+        pipeline.cache_size, pipeline.output_count = 58, 10
+        pipeline.return_items = ('id', 'score')
+        pipeline.debug = False
+        output = StringIO()
+        fresh = [{'id': str(i), 'vector': [i]} for i in range(508)]
+        with redirect_stdout(output):
+            pipeline.reset()
+            pipeline._rank([0], fresh, 0)
+        self.assertEqual(output.getvalue(), '')
+        pipeline.debug = True
+        with redirect_stdout(output):
+            pipeline._rank([0], fresh, 0)
+        records = [json.loads(line.removeprefix('[pat_retrieval] ')) for line in output.getvalue().splitlines()]
+        self.assertEqual([row['stage'] for row in records],
+                         ['candidates', 'pat_rerank_start', 'pat_rerank_complete', 'returned'])
+        self.assertEqual(records[0]['cached_count'], 58)
+        self.assertEqual(records[0]['selected_new_count'], 450)
+        self.assertEqual(records[0]['fresh_cache_overlap'], 58)
+        self.assertEqual(records[1]['document_shape'], [1, 508, 1])
+        self.assertEqual(records[-1]['count'], 10)
+        self.assertNotIn('vector', output.getvalue())
 
 
 if __name__ == '__main__':

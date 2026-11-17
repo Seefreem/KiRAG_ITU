@@ -35,11 +35,14 @@ class RetrievalConfig:
     return_top_k: int = 10
     cache_size: int = 58
     beams: int = 1
+    debug: bool = False
     return_items: tuple[str, ...] = ('id', 'score', 'contents')
     pat_bert: PATBertConfig = field(default_factory=PATBertConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
 
     def __post_init__(self):
+        if type(self.debug) is not bool:
+            raise ValueError('debug must be a boolean')
         for name, lower, upper in (('return_top_k', 1, 508), ('cache_size', 0, 507), ('beams', 1, None)):
             value = getattr(self, name)
             if type(value) is not int or value < lower or (upper is not None and value > upper):
