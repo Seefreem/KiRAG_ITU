@@ -23,5 +23,6 @@
     "device": "cuda",
     "query_maxlength": 512
   },
-  "debug": true
+  "debug": true,
+  "use_cached_query_for_pat_bert": true
 }

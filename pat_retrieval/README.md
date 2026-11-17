@@ -93,3 +93,13 @@ queries -> query_encoded -> faiss_search -> vectors_reconstructed
         -> candidates (cached + deduplicated new)
         -> pat_rerank_start -> pat_rerank_complete -> returned
 ```
+
+FAISS always encodes and searches with the incoming query supplied by the caller.
+`"use_cached_query_for_pat_bert": true` (default) makes only PAT_BERT use the
+first query received for each beam since `reset()`. Set it to `false` for
+PAT_BERT to use the incoming updated query too. Original query text is remembered
+in either mode. When the two query paths differ, both are encoded separately;
+when identical, they share the encoded vectors. KiRAG supplies its normal updated
+queries. `reset()` clears original queries and document caches. Debug records
+include `query_selection`, indicating whether PAT_BERT's selected query differs
+from the incoming query, without printing query text or embeddings.

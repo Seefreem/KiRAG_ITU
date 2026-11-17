@@ -92,7 +92,7 @@ class ConfigurationTests(unittest.TestCase):
         base = dict(index_file='i', index_meta_file='m', corpus_files=('c',))
         for change in (dict(cache_size=508), dict(cache_size=-1), dict(return_top_k=0),
                        dict(beams=0), dict(return_items=('unknown',)), dict(return_items='id'),
-                       dict(corpus_files='corpus.json'), dict(debug='true')):
+                       dict(corpus_files='corpus.json'), dict(debug='true'), dict(use_cached_query_for_pat_bert='true')):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 RetrievalConfig(**(base | change))
 
@@ -138,6 +138,59 @@ class DebugTests(unittest.TestCase):
         self.assertEqual(records[1]['document_shape'], [1, 508, 1])
         self.assertEqual(records[-1]['count'], 10)
         self.assertNotIn('vector', output.getvalue())
+
+
+class QuerySelectionTests(unittest.TestCase):
+    def make_pipeline(self, use_cached_query_for_pat_bert):
+        pipeline = PATRetrievalPipeline.__new__(PATRetrievalPipeline)
+        pipeline.beams = 2
+        pipeline.use_cached_query_for_pat_bert = use_cached_query_for_pat_bert
+        pipeline.reset()
+        return pipeline
+
+    def test_original_queries_persist_per_beam_and_reset(self):
+        pipeline = self.make_pipeline(True)
+        self.assertEqual(pipeline._select_queries(['original A', 'original B']), ['original A', 'original B'])
+        self.assertEqual(pipeline._select_queries(['updated A', 'updated B']), ['original A', 'original B'])
+        self.assertEqual(pipeline._select_queries(['updated again']), ['original A'])
+        pipeline.reset()
+        self.assertEqual(pipeline._original_queries, {})
+        self.assertEqual(pipeline._select_queries(['new question']), ['new question'])
+
+    def test_updated_query_mode_still_remembers_original(self):
+        pipeline = self.make_pipeline(False)
+        pipeline._select_queries(['original'])
+        self.assertEqual(pipeline._select_queries(['updated']), ['updated'])
+        self.assertEqual(pipeline._original_queries, {0: 'original'})
+
+    def test_faiss_always_encodes_incoming_query(self):
+        class RecordingEncoder:
+            def __init__(self):
+                self.calls = []
+
+            def encode(self, queries):
+                self.calls.append(list(queries))
+                return list(queries)  # Distinct stand-ins for encoded vectors.
+
+        for cached in (True, False):
+            with self.subTest(cached=cached):
+                pipeline = self.make_pipeline(cached)
+                pipeline.encoder = RecordingEncoder()
+                faiss, pat = pipeline._encode_queries(['original'])
+                self.assertIs(faiss, pat)
+                faiss, pat = pipeline._encode_queries(['updated'])
+                self.assertEqual(faiss, ['updated'])
+                self.assertEqual(pat, ['original'] if cached else ['updated'])
+                self.assertEqual(pipeline.encoder.calls,
+                                 [['original'], ['updated'], ['original']] if cached
+                                 else [['original'], ['updated']])
+
+    def test_invalid_queries_do_not_change_originals(self):
+        pipeline = self.make_pipeline(True)
+        for queries in (['one', 'two', 'three'], ['valid', ''], [None]):
+            with self.assertRaises(ValueError):
+                pipeline._select_queries(queries)
+        self.assertEqual(pipeline._original_queries, {})
 
 
 if __name__ == '__main__':

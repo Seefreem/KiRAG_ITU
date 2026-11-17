@@ -18,6 +18,7 @@ class PATRetrievalPipeline:
         self.config = config if isinstance(config, RetrievalConfig) else RetrievalConfig.from_file(config)
         config = self.config
         self.debug = config.debug
+        self.use_cached_query_for_pat_bert = config.use_cached_query_for_pat_bert
         self.cache_size = config.cache_size
         self.output_count = config.return_top_k
         self.beams = config.beams
@@ -46,7 +47,7 @@ class PATRetrievalPipeline:
         self._trace('loaded', index_file=config.index_file, metric='inner_product',
                     indexed_documents=self.index.ntotal, embedding_dimension=self.index.d,
                     corpus_files=list(config.corpus_files), checkpoint=bert.checkpoint,
-                    cache_size=self.cache_size, beams=self.beams,
+                    cache_size=self.cache_size, beams=self.beams, use_cached_query_for_pat_bert=self.use_cached_query_for_pat_bert,
                     return_top_k=self.output_count, return_items=list(self.return_items))
         self.reset()
 
@@ -71,7 +72,31 @@ class PATRetrievalPipeline:
         # Titles/text remain in the corpus, not in this internal cache.
         """
         self._caches = {}
+        self._original_queries = {}  # {beam position: first query since reset()}
         self._trace('cache_reset')
+
+    def _select_queries(self, queries):
+        """Select PAT_BERT queries; FAISS always uses the incoming queries."""
+        if len(queries) > self.beams:
+            raise ValueError('Query count exceeds configured beams')
+        if any(not isinstance(query, str) or not query.strip() for query in queries):
+            raise ValueError('Queries must be nonempty strings')
+        for stream, query in enumerate(queries):
+            self._original_queries.setdefault(stream, query)
+        selected = ([self._original_queries[stream] for stream in range(len(queries))]
+                    if self.use_cached_query_for_pat_bert else list(queries))
+        self._trace('query_selection', use_cached_query_for_pat_bert=self.use_cached_query_for_pat_bert,
+                    streams=list(range(len(queries))),
+                    differs_from_provided=[query != provided for query, provided in zip(selected, queries)])
+        return selected
+
+    def _encode_queries(self, incoming):
+        """Return FAISS vectors from incoming queries and PAT vectors by policy."""
+        pat_queries = self._select_queries(incoming)
+        faiss_vectors = self.encoder.encode(incoming)
+        pat_vectors = (faiss_vectors if pat_queries == incoming
+                       else self.encoder.encode(pat_queries))
+        return faiss_vectors, pat_vectors
 
     def _rank(self, query, fresh, stream):
         """Keep cached positions first, then unique new candidates in FAISS order."""
@@ -138,13 +163,16 @@ class PATRetrievalPipeline:
         queries = [queries] if single else list(queries)
         if not queries:
             return []
-        if len(queries) > self.beams:
-            raise ValueError('Query count exceeds configured beams')
         self._trace('queries', count=len(queries), character_counts=[len(query) for query in queries])
-        vectors = np.ascontiguousarray(self.encoder.encode(queries), dtype=np.float32)
+        faiss_vectors, pat_vectors = self._encode_queries(queries)
+        vectors = np.ascontiguousarray(faiss_vectors, dtype=np.float32)
+        pat_vectors = np.ascontiguousarray(pat_vectors, dtype=np.float32)
         if vectors.shape != (len(queries), self.index.d) or not np.isfinite(vectors).all():
             raise ValueError('Invalid query vectors for FAISS index')
-        self._trace('query_encoded', shape=list(vectors.shape), dtype=str(vectors.dtype))
+        if pat_vectors.shape != vectors.shape or not np.isfinite(pat_vectors).all():
+            raise ValueError('Invalid PAT_BERT query vectors')
+        self._trace('query_encoded', faiss_shape=list(vectors.shape),
+                    pat_shape=list(pat_vectors.shape), dtype=str(vectors.dtype))
         # distances, ids = index.search(query_vectors, k=3)
         # Both arrays have shape (number_of_queries, k). For query i, ids[i, j] identifies the j-th ranked result,
         # and distances[i, j] gives its distance or similarity score.
@@ -154,7 +182,7 @@ class PATRetrievalPipeline:
             raise ValueError('FAISS returned missing documents or invalid scores')
         self._trace('faiss_search', metric='inner_product', result_shape=list(rows.shape))
         results = []
-        for stream, (query, retrieved_ids, query_scores) in enumerate(zip(vectors, rows, scores)):
+        for stream, (query, retrieved_ids, query_scores) in enumerate(zip(pat_vectors, rows, scores)):
             documents = self.index.reconstruct_batch(np.ascontiguousarray(retrieved_ids, dtype=np.int64))
             if not np.isfinite(documents).all():
                 raise ValueError('Nonfinite indexed document vectors')
